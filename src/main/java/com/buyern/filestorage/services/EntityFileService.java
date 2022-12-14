@@ -1,14 +1,20 @@
 package com.buyern.filestorage.services;
 
 import com.azure.storage.blob.BlobServiceClient;
+import com.buyern.filestorage.dtos.EntityFileUploadDTO;
 import com.buyern.filestorage.dtos.EntityRegistrationFilesDTO;
+import com.buyern.filestorage.dtos.ResponseDTO;
+import com.buyern.filestorage.enums.Container;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,41 +29,47 @@ public class EntityFileService {
     private final BlobServiceClient blobServiceClient;
     private final FileService fileService;
 
-    public JsonNode uploadEntityRegistrationFiles(EntityRegistrationFilesDTO.EntityRegistrationFilesByteArrayDTO registrationFilesDTO) {
-//        Path logoPath;
-//        Path logoDarkPath;
-//        Path coverImagePath;
-//        Path coverImageDarkPath;
-        String logoSavedLocation = upload(registrationFilesDTO.getEntityId(), "logo", registrationFilesDTO.getLogo());
-        String logoDarkSavedLocation = upload(registrationFilesDTO.getEntityId(), "logoDark", registrationFilesDTO.getLogoDark());
-        String coverSavedLocation = upload(registrationFilesDTO.getEntityId(), "cover", registrationFilesDTO.getCoverImage());
-        String coverDarkSavedLocation = upload(registrationFilesDTO.getEntityId(), "coverDark", registrationFilesDTO.getCoverImageDark());
-        ObjectNode responseNode = new ObjectMapper().createObjectNode();
-        responseNode.put("logo", logoSavedLocation);
-        responseNode.put("logoDark", logoDarkSavedLocation);
-        responseNode.put("cover", coverSavedLocation);
-        responseNode.put("coverDark", coverDarkSavedLocation);
-        return responseNode;
+    public String uploadEntityRegistrationFiles(EntityFileUploadDTO filesUploadDto) {
+        return upload(filesUploadDto.getEntityUid(), filesUploadDto.getName(), filesUploadDto.getFile(), filesUploadDto.getContainer());
 
     }
 
-    private String upload(Long entityId, String destination, byte[] image) {
-
-        Path path;
-        if (image == null) {
+    private String upload(String entityId, String destination, MultipartFile file, Container container) {
+        if (file == null) {
             return null;
         }
-        //get path location file will be moved to locally
-        path = Paths.get(System.getProperty(TEMP_DIR),
-                UUID.randomUUID().toString());
+        EntityStorage entityStorage = new EntityStorage(entityId, blobServiceClient);
+        if (container == Container.PUBLIC)
+            return entityStorage.uploadToPublicStorage(file, destination);
+        else
+            return entityStorage.uploadToPrivateStorage(file, destination);
+    }
+
+    private String uploadByteArray(String entityId, String destination, byte[] file, boolean isPublic) {
+        if (file == null) {
+            return null;
+        }
+        Path path = Paths.get(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString());
         try {
-//                move file
-            Files.write(path, image);
+            Files.write(path, file);
         } catch (IOException e) {
             e.printStackTrace();
         }
         EntityStorage entityStorage = new EntityStorage(entityId, blobServiceClient);
-        return entityStorage.uploadToPublicStorage(path.toFile(), destination);
+        if (isPublic)
+            return entityStorage.uploadToPublicStorage(path.toFile(), destination);
+        else
+            return entityStorage.uploadToPrivateStorage(path.toFile(), destination);
+    }
 
+    public String uploadEntityRegistrationFiles(EntityFileUploadDTO.EntityRegistrationFilesByteArrayDTO fileUploadDto) {
+        return uploadByteArray(fileUploadDto.getEntityUid(), fileUploadDto.getName(), fileUploadDto.getFile(), fileUploadDto.isPublic());
+    }
+
+    public Boolean registerEntity(String entityId) {
+        EntityStorage entityStorage = new EntityStorage(entityId, blobServiceClient);
+        entityStorage.createPublicContainerClient();
+        entityStorage.createPrivateContainerClient();
+        return true;
     }
 }

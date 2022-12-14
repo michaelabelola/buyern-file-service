@@ -25,7 +25,7 @@ public class UserStorage {
     private BlobContainerClient blobPublicContainerClient;
     private BlobContainerClient blobPrivateContainerClient;
     private static final String PUBLIC_CONTAINER_NAME = "users";
-    private static final String PRIVATE_CONTAINER_NAME = "users_private";
+    private static final String PRIVATE_CONTAINER_NAME = "users-private";
 
     public UserStorage(BlobServiceClient blobServiceClient) {
         this.blobServiceClient = blobServiceClient;

@@ -8,6 +8,9 @@ import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.PublicAccessType;
+import com.buyern.filestorage.exceptions.BadRequestException;
+import com.buyern.filestorage.exceptions.EntityAlreadyExistsException;
+import com.buyern.filestorage.exceptions.RecordNotFoundException;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -24,9 +27,9 @@ public class EntityStorage {
     private BlobServiceClient blobServiceClient;
     private BlobContainerClient blobPublicContainerClient;
     private BlobContainerClient blobPrivateContainerClient;
-    private final Long entityId;
+    private final String entityId;
 
-    public EntityStorage(Long entityId, BlobServiceClient blobServiceClient) {
+    public EntityStorage(String entityId, BlobServiceClient blobServiceClient) {
         this.blobServiceClient = blobServiceClient;
         this.entityId = entityId;
         this.blobPublicContainerClient = blobServiceClient.getBlobContainerClient(containerNameParser(entityId, false));
@@ -34,42 +37,30 @@ public class EntityStorage {
     }
 
     public String uploadToPublicStorage(MultipartFile file, String destination) {
-
         String uploadedFileUrl = uploadToStorage(file, destination, blobPublicContainerClient);
-        if (uploadedFileUrl == null) {
-            blobPublicContainerClient = createPublicContainerClient();
-            uploadedFileUrl = uploadToStorage(file, destination, blobPublicContainerClient);
-        }
+        if (uploadedFileUrl == null)
+            throw new BadRequestException("file cant be uploaded to entity");
         log.info(uploadedFileUrl);
         return uploadedFileUrl;
     }
 
     public String uploadToPublicStorage(File file, String destination) {
+//        log.warn("filename "+ file.getName());
+//        log.warn("file space " + String.valueOf(file.getTotalSpace()));
         String uploadedFileUrl = uploadToStorage(file, destination, blobPublicContainerClient);
-        if (uploadedFileUrl == null) {
-            blobPublicContainerClient = createPublicContainerClient();
-            uploadedFileUrl = uploadToStorage(file, destination, blobPublicContainerClient);
-        }
+        log.warn("*******");
         log.info(uploadedFileUrl);
         return uploadedFileUrl;
     }
 
     public String uploadToPrivateStorage(MultipartFile file, String destination) {
         String uploadedFileUrl = uploadToStorage(file, destination, blobPrivateContainerClient);
-        if (uploadedFileUrl == null) {
-            blobPrivateContainerClient = createPrivateContainerClient();
-            uploadedFileUrl = uploadToStorage(file, destination, blobPrivateContainerClient);
-        }
         log.info(uploadedFileUrl);
         return uploadedFileUrl;
     }
 
     public String uploadToPrivateStorage(File file, String destination) {
         String uploadedFileUrl = uploadToStorage(file, destination, blobPrivateContainerClient);
-        if (uploadedFileUrl == null) {
-            blobPrivateContainerClient = createPrivateContainerClient();
-            uploadedFileUrl = uploadToStorage(file, destination, blobPrivateContainerClient);
-        }
         log.info(uploadedFileUrl);
         return uploadedFileUrl;
     }
@@ -79,12 +70,11 @@ public class EntityStorage {
             BlobClient blobClient = blobContainerClient.getBlobClient(destination);
             blobClient.upload(file.getInputStream(), file.getSize(), true);
             return blobClient.getBlobUrl();
-        } catch (IOException ex) {
-            return null;
-//            throw new RuntimeException("can't convert file to stream");
+        } catch (BlobStorageException ex) {
+            ex.printStackTrace();
+            throw new RecordNotFoundException("Container not found");
         } catch (Exception ex) {
             return null;
-//            throw new RuntimeException("Error uploading to storage server");
         }
     }
 
@@ -93,31 +83,36 @@ public class EntityStorage {
             BlobClient blobClient = blobContainerClient.getBlobClient(destination);
             blobClient.upload(BinaryData.fromFile(file.toPath()), true);
             return blobClient.getBlobUrl();
+        } catch (BlobStorageException ex) {
+            ex.printStackTrace();
+            throw new RecordNotFoundException("Container not found");
         } catch (Exception ex) {
             return null;
-//            throw new RuntimeException("Error uploading to storage server");
         }
     }
 
-    public static String containerNameParser(Long entityId, boolean isPrivate) {
-        //container name must be at least 3 characters long
-        if (entityId < 10) return "00" + entityId;
-        else if (entityId < 100) return "0" + entityId;
+    public static String containerNameParser(String entityId, boolean isPrivate) {
         if (isPrivate)
-            return entityId + "_private";
+            return entityId + "-private";
         else return String.valueOf(entityId);
     }
 
-    private BlobContainerClient createPublicContainerClient() {
+    BlobContainerClient createPublicContainerClient() {
         try {
             this.blobPublicContainerClient = blobServiceClient.createBlobContainerWithResponse(containerNameParser(entityId, false), null, PublicAccessType.CONTAINER, Context.NONE).getValue();
             return blobPublicContainerClient;
+        } catch (BlobStorageException ex) {
+            if (ex.getStatusCode() == 409) {
+                throw new EntityAlreadyExistsException("entity storage account already exists");
+            } else {
+                throw new ServerErrorException("Can't create public storage account for entity", ex);
+            }
         } catch (Exception ex) {
             throw new ServerErrorException("Can't create public storage account for entity", ex);
         }
     }
 
-    private BlobContainerClient createPrivateContainerClient() {
+    BlobContainerClient createPrivateContainerClient() {
         try {
             this.blobPrivateContainerClient = blobServiceClient.createBlobContainerWithResponse(containerNameParser(entityId, true), null, null, Context.NONE).getValue();
             return blobPrivateContainerClient;
